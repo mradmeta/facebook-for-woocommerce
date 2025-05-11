@@ -27,7 +27,7 @@ use WooCommerce\Facebook\Framework\Api\Exception as ApiException;
  *
  * @method Framework\Api\Request get_request()
  */
-class API extends Base {
+class API extends RateLimitedAPIBase {
 
 	use API\Traits\Rate_Limited_API;
 
@@ -100,74 +100,6 @@ class API extends Base {
 		}
 		return parent::perform_request( $request );
 	}
-
-	/**
-	 * Validates a response after it has been parsed and instantiated.
-	 *
-	 * Throws an exception if a rate limit or general API error is included in the response.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @throws ApiException
-	 */
-	protected function do_post_parse_response_validation() {
-		/** @var API\Response $response */
-		$response = $this->get_response();
-		$request  = $this->get_request();
-		if ( $response && $response->has_api_error() ) {
-			$code    = $response->get_api_error_code();
-			$message = sprintf( '%s: %s', $response->get_api_error_type(), $response->get_user_error_message() ?: $response->get_api_error_message() );
-			/**
-			 * Graph API
-			 *
-			 * 4 - API Too Many Calls
-			 * 17 - API User Too Many Calls
-			 * 32 - Page-level throttling
-			 * 613 - Custom-level throttling
-			 *
-			 * Marketing API (Catalog Batch API)
-			 *
-			 * 80004 - There have been too many calls to this ad-account
-			 *
-			 * @link https://developers.facebook.com/docs/graph-api/using-graph-api/error-handling#errorcodes
-			 * @link https://developers.facebook.com/docs/graph-api/using-graph-api/error-handling#rate-limiting-error-codes
-			 * @link https://developers.facebook.com/docs/marketing-api/reference/product-catalog/batch/#validation-rules
-			 */
-			if ( in_array( $code, array( 4, 17, 32, 613, 80001, 80004 ), true ) ) {
-				$delay_in_seconds = $this->calculate_rate_limit_delay( $response, $this->get_response_headers() );
-				if ( $delay_in_seconds > 0 ) {
-					$rate_limit_id = $request::get_rate_limit_id();
-					$timestamp     = time() + $delay_in_seconds;
-					$this->set_rate_limit_delay( $rate_limit_id, $timestamp );
-					$this->handle_throttled_request( $rate_limit_id, $timestamp );
-				} else {
-					throw new API\Exceptions\Request_Limit_Reached( $message, $code );
-				}
-			}
-
-			/**
-			 * Handle invalid token errors
-			 *
-			 * @link https://developers.facebook.com/docs/graph-api/using-graph-api/error-handling#errorcodes
-			 */
-			if ( ( $code >= 200 && $code < 300 ) || in_array( $code, array( 10, 102, 190 ), false ) ) {
-				set_transient( 'wc_facebook_connection_invalid', time(), DAY_IN_SECONDS );
-			} else {
-				// this was an unrelated error, so the OAuth connection may still be valid
-				delete_transient( 'wc_facebook_connection_invalid' );
-			}
-			// if the code indicates a retry and we've not hit the retry limit, perform the request again
-			if ( in_array( $code, $request->get_retry_codes(), false ) && $request->get_retry_count() < $request->get_retry_limit() ) {
-				$request->mark_retry();
-				$this->response = $this->perform_request( $request );
-				return;
-			}
-			throw new ApiException( $message, $code );
-		}
-		// if we get this far we're connected, so delete any invalid connection flag
-		delete_transient( 'wc_facebook_connection_invalid' );
-	}
-
 
 	/**
 	 * Handles a throttled API request.
@@ -642,78 +574,6 @@ class API extends Base {
 		$request = new API\Pixel\Events\Request( $pixel_id, $events );
 		$this->set_response_handler( Response::class );
 		return $this->perform_request( $request );
-	}
-
-
-	/**
-	 * Gets the next page of results for a paginated response.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @param API\Response $response previous response object
-	 * @param int          $additional_pages number of additional pages of results to retrieve
-	 * @return API\Response|null
-	 * @throws ApiException
-	 */
-	public function next( API\Response $response, int $additional_pages = 0 ) {
-		$next_response = null;
-		// get the next page if we haven't reached the limit of pages to retrieve and the endpoint for the next page is available
-		if ( ( 0 === $additional_pages || $response->get_pages_retrieved() <= $additional_pages ) && $response->get_next_page_endpoint() ) {
-			$components = parse_url( str_replace( $this->request_uri, '', $response->get_next_page_endpoint() ) );
-			$request = $this->get_new_request(
-				[
-					'path'   => $components['path'] ?? '',
-					'method' => 'GET',
-					'params' => isset( $components['query'] ) ? wp_parse_args( $components['query'] ) : [],
-				]
-			);
-			$this->set_response_handler( get_class( $response ) );
-			$next_response = $this->perform_request( $request );
-			// this is the n + 1 page of results for the original response
-			$next_response->set_pages_retrieved( $response->get_pages_retrieved() + 1 );
-		}
-		return $next_response;
-	}
-
-
-	/**
-	 * Returns a new request object.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @param array $args {
-	 *     Optional. An array of request arguments.
-	 *
-	 *     @type string $path request path
-	 *     @type string $method request method
-	 *     @type array $params request parameters
-	 * }
-	 * @return Request
-	 */
-	protected function get_new_request( $args = [] ) {
-		$defaults = array(
-			'path'   => '/',
-			'method' => 'GET',
-			'params' => [],
-		);
-		$args    = wp_parse_args( $args, $defaults );
-		$request = new Request( $args['path'], $args['method'] );
-		if ( $args['params'] ) {
-			$request->set_params( $args['params'] );
-		}
-		return $request;
-	}
-
-
-	/**
-	 * Returns the plugin class instance associated with this API.
-	 *
-	 * @since 2.0.0
-	 *
-	 * @return \WC_Facebookcommerce
-	 */
-	protected function get_plugin() {
-		return facebook_for_woocommerce();
 	}
 
 	/**
