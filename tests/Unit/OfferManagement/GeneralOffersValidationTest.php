@@ -63,7 +63,7 @@ class GeneralOffersValidationTest extends OfferManagementAPITestBase {
 			[
 				'error_type' => OfferManagementEndpointBase::ERROR_CATALOG_ID_MISMATCH,
 				'offer_code' => null,
-				'error_message' => 'Platform Catalog ID: new_catalog_id, Request Catalog ID: test_catalog_id',
+				'error_message' => 'The catalog ID in the request does not match the configured catalog ID.',
 			],
 		];
 		$this->validate_create_get_delete( $expected_error_data, OfferManagementEndpointBase::HTTP_FORBIDDEN );

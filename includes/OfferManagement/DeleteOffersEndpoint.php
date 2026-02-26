@@ -34,7 +34,10 @@ class DeleteOffersEndpoint extends OfferManagementEndpointBase {
 				wp_delete_post( $coupon_id );
 				$deleted_codes[] = $code;
 			} catch ( \Exception $ex ) {
-				$this->add_error( self::get_error_response_data( self::ERROR_OFFER_DELETE_FAILURE, $ex->getMessage(), $code ) );
+				facebook_for_woocommerce()->log(
+					sprintf( 'Offer Management: Offer deletion failure for code %s: %s', $code, $ex->getMessage() )
+				);
+				$this->add_error( self::get_error_response_data( self::ERROR_OFFER_DELETE_FAILURE, 'An error occurred while deleting the offer.', $code ) );
 			}
 		}
 

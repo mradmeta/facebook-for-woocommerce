@@ -34,7 +34,10 @@ class CreateOffersEndpoint extends OfferManagementEndpointBase {
 				$coupon->save();
 				$created_offers[] = self::get_offer_response_data( $coupon );
 			} catch ( \Exception $ex ) {
-				$this->add_error( self::get_error_response_data( self::ERROR_OFFER_CREATE_FAILURE, $ex->getMessage(), $create_offer_data['code'] ) );
+				facebook_for_woocommerce()->log(
+					sprintf( 'Offer Management: Offer creation failure for code %s: %s', $create_offer_data['code'], $ex->getMessage() )
+				);
+				$this->add_error( self::get_error_response_data( self::ERROR_OFFER_CREATE_FAILURE, 'An error occurred while creating the offer.', $create_offer_data['code'] ) );
 			}
 		}
 

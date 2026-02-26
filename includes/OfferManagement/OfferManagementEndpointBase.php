@@ -72,23 +72,40 @@ abstract class OfferManagementEndpointBase {
 	}
 
 	final public static function register_endpoints(): void {
-		CreateOffersEndpoint::register_endpoint();
-		GetOffersEndpoint::register_endpoint();
-		DeleteOffersEndpoint::register_endpoint();
-	}
-
-	private static function register_endpoint() {
 		add_action(
 			'rest_api_init',
 			function () {
+				$endpoint_classes = [
+					CreateOffersEndpoint::class,
+					GetOffersEndpoint::class,
+					DeleteOffersEndpoint::class,
+				];
+
+				$handlers = array_map(
+					function ( string $class ): array {
+						return [
+							'methods'             => $class::get_method(),
+							'callback'            => [ $class, 'execute_static' ],
+							/*
+							 * Permission callback is intentionally set to __return_true.
+							 *
+							 * These endpoints are server-to-server calls from Meta, authenticated
+							 * via JWT verification inside execute_with_validation(). WordPress
+							 * cookie/nonce authentication is not applicable. A WP_Error from
+							 * permission_callback would return WordPress's standard error format
+							 * instead of our custom { data, errors } format required by the Meta
+							 * API contract.
+							 */
+							'permission_callback' => '__return_true',
+						];
+					},
+					$endpoint_classes
+				);
+
 				register_rest_route(
 					self::API_NAMESPACE,
 					self::ROUTE,
-					[
-						'methods'             => static::get_method(),
-						'callback'            => [ static::class, 'execute_static' ],
-						'permission_callback' => '__return_true',
-					],
+					$handlers,
 				);
 			}
 		);
@@ -135,8 +152,11 @@ abstract class OfferManagementEndpointBase {
 			$this->add_error(
 				self::get_error_response_data(
 					self::ERROR_CATALOG_ID_MISMATCH,
-					sprintf( 'Platform Catalog ID: %s, Request Catalog ID: %s', $fb_integration->get_product_catalog_id(), $jwt_catalog_id )
+					'The catalog ID in the request does not match the configured catalog ID.'
 				)
+			);
+			facebook_for_woocommerce()->log(
+				sprintf( 'Offer Management: Catalog ID mismatch. Platform Catalog ID: %s, Request Catalog ID: %s', $fb_integration->get_product_catalog_id(), $jwt_catalog_id )
 			);
 			return $this->get_request_response( [], self::HTTP_FORBIDDEN );
 		}
@@ -145,7 +165,10 @@ abstract class OfferManagementEndpointBase {
 			$response_data = $this->execute_endpoint( $params['payload'] );
 			return $this->get_request_response( $response_data );
 		} catch ( \Exception $ex ) {
-			$this->add_error( self::get_error_response_data( self::ERROR_OFFER_MANAGEMENT_ERROR, $ex->getMessage() ) );
+			facebook_for_woocommerce()->log(
+				sprintf( 'Offer Management: Unexpected error during endpoint execution: %s', $ex->getMessage() )
+			);
+			$this->add_error( self::get_error_response_data( self::ERROR_OFFER_MANAGEMENT_ERROR, 'An unexpected error occurred while processing the request.' ) );
 			return $this->get_request_response( [], self::HTTP_ERROR );
 		}
 	}
@@ -157,7 +180,10 @@ abstract class OfferManagementEndpointBase {
 			$this->add_error( self::get_error_response_data( self::ERROR_JWT_EXPIRED ) );
 			return null;
 		} catch ( \Exception $ex ) {
-			$this->add_error( self::get_error_response_data( self::ERROR_JWT_DECODE_FAILURE, $ex->getMessage() ) );
+			facebook_for_woocommerce()->log(
+				sprintf( 'Offer Management: JWT decode failure: %s', $ex->getMessage() )
+			);
+			$this->add_error( self::get_error_response_data( self::ERROR_JWT_DECODE_FAILURE, 'Failed to decode the JWT token.' ) );
 			return null;
 		}
 		return $decoded_params;
@@ -193,6 +219,14 @@ abstract class OfferManagementEndpointBase {
 		];
 	}
 
+	/**
+	 * Retrieves a required parameter value from the params array.
+	 *
+	 * @param string $field_name The name of the field to retrieve.
+	 * @param array  $params     The parameters array to search in.
+	 * @return mixed The value of the requested field.
+	 * @throws \OutOfBoundsException If the field does not exist in the params array.
+	 */
 	protected static function get_params_value_enforced( string $field_name, array $params ) {
 		if ( array_key_exists( $field_name, $params ) ) {
 			return $params[ $field_name ];

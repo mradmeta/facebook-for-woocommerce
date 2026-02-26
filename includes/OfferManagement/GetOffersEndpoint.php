@@ -44,8 +44,4 @@ class GetOffersEndpoint extends OfferManagementEndpointBase {
 	private static function get_response_data( array $offers ): array {
 		return [ 'offers' => $offers ];
 	}
-
-	protected static function get_empty_response_data() {
-		return self::get_response_data( [] );
-	}
 }

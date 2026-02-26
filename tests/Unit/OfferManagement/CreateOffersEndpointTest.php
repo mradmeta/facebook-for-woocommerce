@@ -273,7 +273,7 @@ class CreateOffersEndpointTest extends OfferManagementAPITestBase
 		$this->assertEquals(1, sizeof($errors));
 		$error = $errors[0];
 		$this->assertEquals(OfferManagementEndpointBase::ERROR_OFFER_MANAGEMENT_ERROR, $error['error_type']);
-		$this->assertStringContainsString('create_offers_data does not exist in request params', $error['error_message']);
+		$this->assertEquals('An unexpected error occurred while processing the request.', $error['error_message']);
 		$this->assertEmpty($error['offer_code']);
 	}
 
